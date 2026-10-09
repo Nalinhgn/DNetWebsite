@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Taniya — Home Lands</title>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f4f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 20px;
+      padding: 44px 40px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+      text-align: center;
+    }
+    .avatar {
+      width: 84px;
+      height: 84px;
+      background: linear-gradient(135deg, #1b5e3b, #52b788);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 34px;
+      color: white;
+      font-weight: 700;
+      margin: 0 auto 20px;
+      transition: box-shadow 0.3s;
+    }
+    .avatar.pulse {
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(27,94,59,0.35); }
+      50% { box-shadow: 0 0 0 14px rgba(27,94,59,0); }
+    }
+    .brand { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: #aaa; margin-bottom: 6px; }
+    h1 { font-size: 26px; font-weight: 700; color: #111; margin-bottom: 4px; }
+    .subtitle { font-size: 14px; color: #999; margin-bottom: 32px; }
+    input {
+      width: 100%;
+      padding: 13px 16px;
+      border: 1.5px solid #e5e5e5;
+      border-radius: 10px;
+      font-size: 15px;
+      outline: none;
+      margin-bottom: 14px;
+      color: #111;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #1b5e3b; }
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .btn-call { background: #1b5e3b; color: white; }
+    .btn-call:hover:not(:disabled) { background: #16502f; }
+    .btn-end { background: #dc2626; color: white; }
+    .btn-end:hover:not(:disabled) { background: #b91c1c; }
+    .status {
+      margin-top: 18px;
+      font-size: 13px;
+      color: #999;
+      min-height: 18px;
+    }
+    .status.ok { color: #1b5e3b; font-weight: 500; }
+    .status.err { color: #dc2626; }
+    #calling { display: none; }
+    .timer { margin-top: 16px; font-size: 22px; font-weight: 600; color: #1b5e3b; letter-spacing: 2px; }
+    .call-hint { margin-top: 10px; font-size: 13px; color: #bbb; }
+  </style>
+</head>
+<body>
+<div class="card">
+
+  <!-- Setup screen -->
+  <div id="setup">
+    <div class="avatar" id="avatarSetup">T</div>
+    <p class="brand">Home Lands</p>
+    <h1>Taniya</h1>
+    <p class="subtitle">AI Voice Consultant</p>
+    <button class="btn btn-call" id="callBtn" onclick="startCall()">Call Taniya</button>
+    <p class="status" id="setupStatus"></p>
+  </div>
+
+  <!-- Active call screen -->
+  <div id="calling">
+    <div class="avatar pulse" id="avatarCall">T</div>
+    <p class="brand">Home Lands</p>
+    <h1>Taniya</h1>
+    <p class="subtitle" id="callLabel">Connecting...</p>
+    <button class="btn btn-end" id="endBtn" onclick="endCall()">End Call</button>
+    <div class="timer" id="timer">00:00</div>
+    <p class="call-hint">Speak after Taniya's greeting</p>
+  </div>
+
+</div>
+
+<script>
+const { Room, RoomEvent, Track } = LivekitClient;
+let room = null;
+let timerInterval = null;
+let elapsed = 0;
+
+async function startCall() {
+  const callBtn = document.getElementById('callBtn');
+  const statusEl = document.getElementById('setupStatus');
+  const name = `guest-${Date.now()}`;
+
+  callBtn.disabled = true;
+  statusEl.textContent = 'Connecting...';
+  statusEl.className = 'status';
+
+  try {
+    const resp = await fetch(`/api/token?name=${encodeURIComponent(name)}`);
+    if (!resp.ok) throw new Error('Token error');
+    const { token, url } = await resp.json();
+
+    room = new Room({
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Audio) {
+        const el = track.attach();
+        el.autoplay = true;
+        document.body.appendChild(el);
+      }
+    });
+
+    room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach());
+
+    room.on(RoomEvent.Connected, () => {
+      document.getElementById('callLabel').textContent = 'Connected';
+    });
+
+    room.on(RoomEvent.Disconnected, () => showSetup('Call ended.'));
+
+    await room.connect(url, token);
+    await room.localParticipant.setMicrophoneEnabled(true);
+
+    document.getElementById('setup').style.display = 'none';
+    document.getElementById('calling').style.display = 'block';
+    startTimer();
+
+  } catch (err) {
+    statusEl.textContent = 'Could not connect. Please try again.';
+    statusEl.className = 'status err';
+    callBtn.disabled = false;
+    console.error(err);
+  }
+}
+
+async function endCall() {
+  document.getElementById('endBtn').disabled = true;
+  if (room) { await room.disconnect(); room = null; }
+  showSetup('Call ended.');
+}
+
+function showSetup(msg) {
+  stopTimer();
+  document.querySelectorAll('audio').forEach(el => el.remove());
+  document.getElementById('setup').style.display = 'block';
+  document.getElementById('calling').style.display = 'none';
+  document.getElementById('callBtn').disabled = false;
+  document.getElementById('endBtn').disabled = false;
+  const s = document.getElementById('setupStatus');
+  s.textContent = msg || '';
+  s.className = 'status ok';
+}
+
+function startTimer() {
+  elapsed = 0;
+  timerInterval = setInterval(() => {
+    elapsed++;
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    document.getElementById('timer').textContent = `${m}:${s}`;
+  }, 1000);
+}
+
+function stopTimer() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  elapsed = 0;
+  document.getElementById('timer').textContent = '00:00';
+}
+
+</script>
+</body>
+</html>
